@@ -662,7 +662,7 @@ jobs:
             --argjson heuristic "$HEURISTIC_APPROVAL_SCORE" \
             --argjson claude "$CLAUDE_APPROVAL_SCORE" \
             --argjson codex "$CODEX_APPROVAL_SCORE" \
-            '(([$heuristic, $claude, $codex] | add / length) * 100 | round / 100)')"
+            '(($heuristic * 0.2 + $claude * 0.4 + $codex * 0.4) * 100 | round / 100)')"
 
           FINAL_DECISION="$(jq -nr \
             --argjson avg "$AVERAGE_APPROVAL_SCORE" \
