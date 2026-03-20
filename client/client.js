@@ -298,7 +298,6 @@ function render() {
         ctx.lineTo(half, half);
         ctx.moveTo(half, -half);
         ctx.lineTo(-half, half);
-        ctx.strokeStyle = '#6B4F12';
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.restore();

@@ -188,6 +188,12 @@ function clampPointToPolygon(px, py, vertices) {
   return { x: bestX, y: bestY };
 }
 
+function dist(x1, y1, x2, y2) {
+  const dx = x1 - x2;
+  const dy = y1 - y2;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 function polygonArea(vertices) {
   let area = 0;
   const n = vertices.length;
@@ -434,30 +440,16 @@ class Game {
     obstacleCount = Math.max(3, Math.min(20, obstacleCount));
     this.obstacles = [];
     for (let i = 0; i < obstacleCount; i++) {
-      let placed = false;
       for (let attempt = 0; attempt < 30; attempt++) {
         const pos = randomPointInPolygon(this.arenaVertices, this.arenaCentroid, 0.85);
-        // Check distance from player spawns
-        let tooClose = false;
-        for (const sp of playerSpawns) {
-          const dx = pos.x - sp.x;
-          const dy = pos.y - sp.y;
-          if (Math.sqrt(dx * dx + dy * dy) < OBSTACLE_MIN_SPAWN_DIST) {
-            tooClose = true;
-            break;
-          }
-        }
-        if (tooClose) continue;
-        // Check distance from other obstacles
-        for (const ob of this.obstacles) {
-          const dx = pos.x - ob.x;
-          const dy = pos.y - ob.y;
-          if (Math.sqrt(dx * dx + dy * dy) < OBSTACLE_RADIUS * 2.5) {
-            tooClose = true;
-            break;
-          }
-        }
-        if (tooClose) continue;
+        const tooCloseToSpawn = playerSpawns.some(
+          sp => dist(pos.x, pos.y, sp.x, sp.y) < OBSTACLE_MIN_SPAWN_DIST
+        );
+        if (tooCloseToSpawn) continue;
+        const tooCloseToObstacle = this.obstacles.some(
+          ob => dist(pos.x, pos.y, ob.x, ob.y) < OBSTACLE_RADIUS * 2.5
+        );
+        if (tooCloseToObstacle) continue;
         const typeInfo = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
         this.obstacles.push({
           id: this.nextObstacleId++,
@@ -468,7 +460,6 @@ class Game {
           maxHp: typeInfo.hp,
           alive: true,
         });
-        placed = true;
         break;
       }
     }
@@ -529,10 +520,8 @@ class Game {
     // Check obstacle collisions before arena bounds
     for (const obstacle of this.obstacles) {
       if (!obstacle.alive) continue;
-      const odx = newX - obstacle.x;
-      const ody = newY - obstacle.y;
-      if (Math.sqrt(odx * odx + ody * ody) < PLAYER_RADIUS + OBSTACLE_RADIUS) {
-        return; // blocked by obstacle, keep old position
+      if (dist(newX, newY, obstacle.x, obstacle.y) < PLAYER_RADIUS + OBSTACLE_RADIUS) {
+        return; // blocked by obstacle
       }
     }
 
@@ -578,9 +567,7 @@ class Game {
       // Check collision with obstacles
       for (const obstacle of this.obstacles) {
         if (!obstacle.alive) continue;
-        const odx = bullet.x - obstacle.x;
-        const ody = bullet.y - obstacle.y;
-        if (Math.sqrt(odx * odx + ody * ody) < BULLET_RADIUS + OBSTACLE_RADIUS) {
+        if (dist(bullet.x, bullet.y, obstacle.x, obstacle.y) < BULLET_RADIUS + OBSTACLE_RADIUS) {
           obstacle.hp -= bullet.damage;
           if (obstacle.hp <= 0) {
             obstacle.hp = 0;
@@ -713,9 +700,16 @@ class Game {
         y: b.y,
         ownerId: b.ownerId,
       })),
-      obstacles: this.obstacles.filter(o => o.alive).map(o => ({
-        id: o.id, type: o.type, x: o.x, y: o.y, hp: o.hp, maxHp: o.maxHp
-      })),
+      obstacles: this.obstacles
+        .filter((o) => o.alive)
+        .map((o) => ({
+          id: o.id,
+          type: o.type,
+          x: o.x,
+          y: o.y,
+          hp: o.hp,
+          maxHp: o.maxHp,
+        })),
       winnerId: this.winnerId,
       yourId: forPlayerId,
       isSpectator: this.spectators.has(forPlayerId),
