@@ -369,11 +369,12 @@ function drawStickFigure(player, scale, cx, cy) {
     ctx.fillRect(px - barWidth / 2, barY, barWidth * hpFrac, barHeight);
   }
 
-  // Name label
-  ctx.font = `${Math.max(8, r * 0.35)}px monospace`;
+  // Name label — small font, positioned clearly below feet
+  const nameFontSize = Math.max(7, r * 0.25);
+  ctx.font = `${nameFontSize}px monospace`;
   ctx.fillStyle = isMe ? '#4fc' : '#aaa';
   ctx.textAlign = 'center';
-  ctx.fillText(player.name, px, py + r * 1.3);
+  ctx.fillText(player.name, px, py + r * 0.8 + nameFontSize + 2);
 
   ctx.restore();
 }
