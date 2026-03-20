@@ -586,6 +586,75 @@ test('Property: movement clamp keeps player inside polygon (50 seeds)', () => {
   }
 });
 
+// --- setPlayerName Tests ---
+
+test('setPlayerName accepts a valid nickname', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.setPlayerName(id, 'Alice');
+  assert(game.players.get(id).name === 'Alice', 'name set to Alice');
+});
+
+test('setPlayerName trims whitespace', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.setPlayerName(id, '  Bob  ');
+  assert(game.players.get(id).name === 'Bob', 'name trimmed to Bob');
+});
+
+test('setPlayerName truncates names longer than 16 characters', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.setPlayerName(id, 'A'.repeat(20));
+  assert(game.players.get(id).name.length === 16, 'name truncated to 16 chars');
+  assert(game.players.get(id).name === 'A'.repeat(16), 'name is 16 As');
+});
+
+test('setPlayerName falls back to default for empty/whitespace-only names', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.setPlayerName(id, '');
+  assert(game.players.get(id).name === `Player ${id}`, 'empty name falls back to default');
+
+  game.setPlayerName(id, '   ');
+  assert(game.players.get(id).name === `Player ${id}`, 'whitespace-only name falls back to default');
+});
+
+test('setPlayerName falls back to default for non-string input', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.setPlayerName(id, 123);
+  assert(game.players.get(id).name === `Player ${id}`, 'number input falls back to default');
+
+  game.setPlayerName(id, null);
+  assert(game.players.get(id).name === `Player ${id}`, 'null input falls back to default');
+
+  game.setPlayerName(id, undefined);
+  assert(game.players.get(id).name === `Player ${id}`, 'undefined input falls back to default');
+});
+
+test('setPlayerName updates name in game state', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.setPlayerName(id, 'TestUser');
+  const state = game.getState(id);
+  const player = state.players.find((p) => p.id === id);
+  assert(player.name === 'TestUser', 'name appears in serialized state');
+});
+
+test('setPlayerName does nothing for unknown player', () => {
+  const game = new Game();
+  // Should not throw
+  game.setPlayerName(999, 'Ghost');
+  assert(true, 'no error for unknown player');
+});
+
 // --- Summary ---
 console.log(`\n${'='.repeat(40)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
