@@ -10,11 +10,16 @@ const {
   STATE_ROUND_END,
   MIN_PLAYERS_TO_START,
   RING_SHRINK_DURATION_MS,
+  OBSTACLE_RADIUS,
+  OBSTACLE_TYPES,
+  OBSTACLE_MIN_SPAWN_DIST,
+  OBSTACLE_AREA_PER_OBSTACLE,
   generateConvexPolygon,
   getPolygonCentroid,
   scalePolygonTowardCentroid,
   pointInConvexPolygon,
   clampPointToPolygon,
+  polygonArea,
 } = require('../server/game');
 
 let passed = 0;
@@ -692,6 +697,220 @@ test('Property: movement clamp keeps player inside polygon (50 seeds)', () => {
       `seed ${seed}: clamped player is inside polygon after move`
     );
   }
+});
+
+// --- Obstacle Tests ---
+
+test('Obstacles spawn at round start', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  assert(Array.isArray(game.obstacles), 'obstacles is an array');
+  assert(game.obstacles.length > 0, 'obstacles spawned');
+  for (const ob of game.obstacles) {
+    assert(ob.alive === true, `obstacle ${ob.id} is alive`);
+    assert(typeof ob.type === 'string', `obstacle ${ob.id} has type`);
+    assert(ob.hp > 0, `obstacle ${ob.id} has positive HP`);
+    assert(ob.maxHp > 0, `obstacle ${ob.id} has positive maxHp`);
+    assert(
+      pointInConvexPolygon(ob.x, ob.y, game.arenaVertices),
+      `obstacle ${ob.id} inside arena polygon`
+    );
+  }
+});
+
+test('Obstacles have two distinct types', () => {
+  const types = new Set();
+  for (let i = 0; i < 20; i++) {
+    const game = new Game();
+    const mockWs1 = { readyState: 1, send: () => {} };
+    const mockWs2 = { readyState: 1, send: () => {} };
+    game.addPlayer(mockWs1);
+    game.addPlayer(mockWs2);
+    game.startRound();
+    for (const ob of game.obstacles) {
+      types.add(ob.type);
+    }
+  }
+  assert(types.has('crate'), 'crate type appears');
+  assert(types.has('rock'), 'rock type appears');
+});
+
+test('Obstacles avoid player spawn points', () => {
+  for (let seed = 0; seed < 10; seed++) {
+    const game = new Game();
+    const mockWs1 = { readyState: 1, send: () => {} };
+    const mockWs2 = { readyState: 1, send: () => {} };
+    const id1 = game.addPlayer(mockWs1);
+    const id2 = game.addPlayer(mockWs2);
+    game.startRound();
+    const p1 = game.players.get(id1);
+    const p2 = game.players.get(id2);
+    for (const ob of game.obstacles) {
+      const d1 = Math.sqrt((ob.x - p1.x) ** 2 + (ob.y - p1.y) ** 2);
+      const d2 = Math.sqrt((ob.x - p2.x) ** 2 + (ob.y - p2.y) ** 2);
+      assert(d1 >= OBSTACLE_MIN_SPAWN_DIST, `seed ${seed}: obstacle ${ob.id} far enough from p1 (${d1.toFixed(1)})`);
+      assert(d2 >= OBSTACLE_MIN_SPAWN_DIST, `seed ${seed}: obstacle ${ob.id} far enough from p2 (${d2.toFixed(1)})`);
+    }
+  }
+});
+
+test('Player movement blocked by obstacles', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  const id2 = game.addPlayer(mockWs2);
+  game.startRound();
+  const player = game.players.get(id2);
+  // Place player at centroid, obstacle 40 pixels to the right (just outside collision range: 15+20=35)
+  player.x = game.arenaCentroid.x;
+  player.y = game.arenaCentroid.y;
+  game.obstacles = [{
+    id: 999, type: 'crate', x: player.x + 40, y: player.y,
+    hp: 80, maxHp: 80, alive: true,
+  }];
+  const oldX = player.x;
+  player.input.right = true;
+  // Small dt so the step (200*0.05=10px) puts player at centroid.x+10, distance to obstacle = 30 < 35 => blocked
+  game.movePlayer(player, 0.05);
+  assert(Math.abs(player.x - oldX) < 0.01, 'player blocked by obstacle (stayed in place)');
+});
+
+test('Bullets damage obstacles', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  const id1 = game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  // Place obstacle at a known position
+  game.obstacles = [{
+    id: 999, type: 'crate', x: 100, y: 100,
+    hp: 80, maxHp: 80, alive: true,
+  }];
+  // Place bullet on top of obstacle
+  game.bullets.push({
+    id: 'test-ob', ownerId: id1,
+    x: 100, y: 100, vx: 0, vy: 0,
+    radius: 4, damage: BULLET_DAMAGE, createdAt: Date.now(),
+  });
+  game.updateBullets(0.05, Date.now());
+  assert(game.obstacles[0].hp < 80, 'obstacle took damage');
+  assert(game.bullets.length === 0, 'bullet consumed by obstacle');
+});
+
+test('Obstacle destroyed at zero HP', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  const id1 = game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  game.obstacles = [{
+    id: 999, type: 'crate', x: 100, y: 100,
+    hp: 1, maxHp: 80, alive: true,
+  }];
+  game.bullets.push({
+    id: 'test-kill', ownerId: id1,
+    x: 100, y: 100, vx: 0, vy: 0,
+    radius: 4, damage: BULLET_DAMAGE, createdAt: Date.now(),
+  });
+  game.updateBullets(0.05, Date.now());
+  assert(game.obstacles[0].alive === false, 'obstacle destroyed');
+  assert(game.obstacles[0].hp === 0, 'obstacle HP is 0');
+});
+
+test('Ring destroys obstacles outside boundary', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  // Place obstacle near edge of arena
+  const v = game.arenaVertices[0];
+  game.obstacles = [{
+    id: 999, type: 'rock', x: v.x * 0.8, y: v.y * 0.8,
+    hp: 150, maxHp: 150, alive: true,
+  }];
+  // Shrink ring to very small
+  game.ringStartTime = Date.now() - RING_SHRINK_DURATION_MS;
+  game.tickActive(0.05, Date.now());
+  assert(game.obstacles[0].alive === false, 'obstacle outside ring is destroyed');
+});
+
+test('getState includes obstacles', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  const id1 = game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  const state = game.getState(id1);
+  assert(Array.isArray(state.obstacles), 'state has obstacles array');
+  assert(state.obstacles.length > 0, 'obstacles in state');
+  const ob = state.obstacles[0];
+  assert(typeof ob.id === 'number', 'obstacle has id');
+  assert(typeof ob.type === 'string', 'obstacle has type');
+  assert(typeof ob.x === 'number', 'obstacle has x');
+  assert(typeof ob.y === 'number', 'obstacle has y');
+  assert(typeof ob.hp === 'number', 'obstacle has hp');
+  assert(typeof ob.maxHp === 'number', 'obstacle has maxHp');
+});
+
+test('Destroyed obstacles excluded from getState', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  const id1 = game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  game.obstacles = [
+    { id: 1, type: 'crate', x: 0, y: 0, hp: 80, maxHp: 80, alive: true },
+    { id: 2, type: 'rock', x: 50, y: 50, hp: 0, maxHp: 150, alive: false },
+  ];
+  const state = game.getState(id1);
+  assert(state.obstacles.length === 1, 'only alive obstacles in state');
+  assert(state.obstacles[0].id === 1, 'alive obstacle is the correct one');
+});
+
+test('Obstacle count scales with arena area', () => {
+  // Test polygonArea works correctly
+  const square = [
+    { x: -100, y: -100 },
+    { x: 100, y: -100 },
+    { x: 100, y: 100 },
+    { x: -100, y: 100 },
+  ];
+  const area = polygonArea(square);
+  assert(Math.abs(area - 40000) < 1, `polygonArea of 200x200 square is 40000 (got ${area})`);
+
+  // Verify obstacle count is reasonable for the game arena
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  assert(game.obstacles.length >= 3, `at least 3 obstacles (got ${game.obstacles.length})`);
+  assert(game.obstacles.length <= 20, `at most 20 obstacles (got ${game.obstacles.length})`);
+});
+
+test('resetForNextRound clears obstacles', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.startRound();
+  assert(game.obstacles.length > 0, 'obstacles exist after startRound');
+  game.state = STATE_ROUND_END;
+  game.resetForNextRound();
+  assert(game.obstacles.length === 0, 'obstacles cleared after reset');
 });
 
 // --- Summary ---

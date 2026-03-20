@@ -16,6 +16,13 @@ const ROUND_END_DELAY_MS = 5000; // 5 seconds before resetting
 const MIN_PLAYERS_TO_START = 2;
 const TICK_RATE = 20; // ticks per second
 const TICK_INTERVAL_MS = 1000 / TICK_RATE;
+const OBSTACLE_RADIUS = 20;
+const OBSTACLE_TYPES = [
+  { type: 'crate', hp: 80 },
+  { type: 'rock', hp: 150 },
+];
+const OBSTACLE_MIN_SPAWN_DIST = 60;
+const OBSTACLE_AREA_PER_OBSTACLE = 40000;
 
 // --- Polygon Geometry Utilities ---
 
@@ -181,6 +188,17 @@ function clampPointToPolygon(px, py, vertices) {
   return { x: bestX, y: bestY };
 }
 
+function polygonArea(vertices) {
+  let area = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += vertices[i].x * vertices[j].y;
+    area -= vertices[j].x * vertices[i].y;
+  }
+  return Math.abs(area) / 2;
+}
+
 function randomPointInPolygon(vertices, centroid, radiusFraction) {
   // Pick a random edge, choose a random point along it, then lerp from centroid.
   // Validate the result is inside the polygon; retry if not (defensive).
@@ -225,6 +243,8 @@ class Game {
     this.roundParticipants = 0; // players who started the round
     this.lastTick = Date.now();
     this.tickInterval = null;
+    this.obstacles = [];
+    this.nextObstacleId = 1;
     this.onBroadcast = null; // callback for broadcasting state
   }
 
@@ -401,6 +421,57 @@ class Game {
         index++;
       }
     }
+
+    // Spawn obstacles
+    const playerSpawns = [];
+    for (const player of this.players.values()) {
+      if (!this.spectators.has(player.id)) {
+        playerSpawns.push({ x: player.x, y: player.y });
+      }
+    }
+    const area = polygonArea(this.arenaVertices);
+    let obstacleCount = Math.floor(area / OBSTACLE_AREA_PER_OBSTACLE);
+    obstacleCount = Math.max(3, Math.min(20, obstacleCount));
+    this.obstacles = [];
+    for (let i = 0; i < obstacleCount; i++) {
+      let placed = false;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const pos = randomPointInPolygon(this.arenaVertices, this.arenaCentroid, 0.85);
+        // Check distance from player spawns
+        let tooClose = false;
+        for (const sp of playerSpawns) {
+          const dx = pos.x - sp.x;
+          const dy = pos.y - sp.y;
+          if (Math.sqrt(dx * dx + dy * dy) < OBSTACLE_MIN_SPAWN_DIST) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+        // Check distance from other obstacles
+        for (const ob of this.obstacles) {
+          const dx = pos.x - ob.x;
+          const dy = pos.y - ob.y;
+          if (Math.sqrt(dx * dx + dy * dy) < OBSTACLE_RADIUS * 2.5) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+        const typeInfo = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+        this.obstacles.push({
+          id: this.nextObstacleId++,
+          type: typeInfo.type,
+          x: pos.x,
+          y: pos.y,
+          hp: typeInfo.hp,
+          maxHp: typeInfo.hp,
+          alive: true,
+        });
+        placed = true;
+        break;
+      }
+    }
   }
 
   tickActive(dt, now) {
@@ -412,6 +483,13 @@ class Game {
       this.arenaCentroid,
       shrinkProgress * 0.95
     );
+
+    // Destroy obstacles outside the ring
+    for (const obstacle of this.obstacles) {
+      if (obstacle.alive && !pointInConvexPolygon(obstacle.x, obstacle.y, this.ringVertices)) {
+        obstacle.alive = false;
+      }
+    }
 
     // Move players
     for (const player of this.players.values()) {
@@ -448,6 +526,16 @@ class Game {
     const newX = player.x + dx;
     const newY = player.y + dy;
 
+    // Check obstacle collisions before arena bounds
+    for (const obstacle of this.obstacles) {
+      if (!obstacle.alive) continue;
+      const odx = newX - obstacle.x;
+      const ody = newY - obstacle.y;
+      if (Math.sqrt(odx * odx + ody * ody) < PLAYER_RADIUS + OBSTACLE_RADIUS) {
+        return; // blocked by obstacle, keep old position
+      }
+    }
+
     // Server-authoritative: clamp to polygon arena bounds
     if (pointInConvexPolygon(newX, newY, this.arenaVertices)) {
       player.x = newX;
@@ -482,6 +570,21 @@ class Game {
           if (player.hp <= 0) {
             player.hp = 0;
             player.alive = false;
+          }
+          return false; // bullet consumed
+        }
+      }
+
+      // Check collision with obstacles
+      for (const obstacle of this.obstacles) {
+        if (!obstacle.alive) continue;
+        const odx = bullet.x - obstacle.x;
+        const ody = bullet.y - obstacle.y;
+        if (Math.sqrt(odx * odx + ody * ody) < BULLET_RADIUS + OBSTACLE_RADIUS) {
+          obstacle.hp -= bullet.damage;
+          if (obstacle.hp <= 0) {
+            obstacle.hp = 0;
+            obstacle.alive = false;
           }
           return false; // bullet consumed
         }
@@ -534,6 +637,7 @@ class Game {
     this.arenaCentroid = getPolygonCentroid(this.arenaVertices);
     this.ringVertices = this.arenaVertices.map((v) => ({ x: v.x, y: v.y }));
     this.bullets = [];
+    this.obstacles = [];
     this.winnerId = null;
     this.lobbyCountdownStart = 0;
     this.roundParticipants = 0;
@@ -609,6 +713,9 @@ class Game {
         y: b.y,
         ownerId: b.ownerId,
       })),
+      obstacles: this.obstacles.filter(o => o.alive).map(o => ({
+        id: o.id, type: o.type, x: o.x, y: o.y, hp: o.hp, maxHp: o.maxHp
+      })),
       winnerId: this.winnerId,
       yourId: forPlayerId,
       isSpectator: this.spectators.has(forPlayerId),
@@ -642,9 +749,14 @@ module.exports = {
   STATE_LOBBY,
   STATE_ACTIVE,
   STATE_ROUND_END,
+  OBSTACLE_RADIUS,
+  OBSTACLE_TYPES,
+  OBSTACLE_MIN_SPAWN_DIST,
+  OBSTACLE_AREA_PER_OBSTACLE,
   generateConvexPolygon,
   getPolygonCentroid,
   scalePolygonTowardCentroid,
   pointInConvexPolygon,
   clampPointToPolygon,
+  polygonArea,
 };

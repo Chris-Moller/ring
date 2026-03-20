@@ -274,6 +274,66 @@ function render() {
     ctx.stroke();
   }
 
+  // Draw obstacles
+  if (gameState.obstacles) {
+    for (const obstacle of gameState.obstacles) {
+      const ox = cx + obstacle.x * scale;
+      const oy = cy + obstacle.y * scale;
+      const or = 20 * scale;
+
+      if (obstacle.type === 'crate') {
+        // Draw rotated brown rectangle
+        ctx.save();
+        ctx.translate(ox, oy);
+        ctx.rotate(0.3); // slight rotation for visual interest
+        const half = or * 0.8;
+        ctx.fillStyle = '#8B6914';
+        ctx.fillRect(-half, -half, half * 2, half * 2);
+        ctx.strokeStyle = '#6B4F12';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-half, -half, half * 2, half * 2);
+        // Cross-hatch X
+        ctx.beginPath();
+        ctx.moveTo(-half, -half);
+        ctx.lineTo(half, half);
+        ctx.moveTo(half, -half);
+        ctx.lineTo(-half, half);
+        ctx.strokeStyle = '#6B4F12';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      } else if (obstacle.type === 'rock') {
+        // Draw irregular gray shape (6-point rough circle seeded by id)
+        ctx.beginPath();
+        const seed = obstacle.id * 137;
+        for (let i = 0; i < 6; i++) {
+          const angle = (i / 6) * Math.PI * 2;
+          const variance = 0.7 + ((((seed + i * 53) % 100) / 100) * 0.3);
+          const rx = ox + Math.cos(angle) * or * variance;
+          const ry = oy + Math.sin(angle) * or * variance;
+          if (i === 0) ctx.moveTo(rx, ry);
+          else ctx.lineTo(rx, ry);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#666';
+        ctx.fill();
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // HP bar below obstacle
+      const barWidth = or * 1.5;
+      const barHeight = 3;
+      const barY = oy + or + 4;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(ox - barWidth / 2, barY, barWidth, barHeight);
+      const hpFrac = Math.max(0, obstacle.hp / obstacle.maxHp);
+      ctx.fillStyle = hpFrac > 0.6 ? '#4f4' : hpFrac > 0.3 ? '#ff4' : '#f44';
+      ctx.fillRect(ox - barWidth / 2, barY, barWidth * hpFrac, barHeight);
+    }
+  }
+
   // Draw bullets
   for (const bullet of gameState.bullets) {
     const bx = cx + bullet.x * scale;
