@@ -2,32 +2,19 @@
 
 ## Task
 
-The task description, type, size, and acceptance criteria were all provided as `undefined`. There is no specific feature, bug fix, or enhancement to implement.
+Add a dialog with the controls — a client-side overlay that shows the player how to play the game (WASD to move, mouse to aim, click to shoot). The dialog must be dismissible and must not block WebSocket initialization.
 
-## Codebase Analysis
+## Approach
 
-**Ring - Battle Royale** is a top-down multiplayer stick-figure arena game built with:
+1. **HTML**: Add a `#controls-overlay` div containing a `#controls-dialog` with a table of keybindings (WASD/Mouse/Click) and a dismiss button. Also add a small `#controls-hint` label so the player can re-open the dialog.
+2. **CSS**: Style the overlay as a centered modal with semi-transparent backdrop, matching the game's dark monospace theme.
+3. **JS**: Wire up dismiss/show logic — clicking the button, clicking the backdrop, pressing Escape, or pressing H all toggle the dialog. The dialog code runs after `connect()` so it never blocks WebSocket initialization.
 
-- **Server**: Node.js with `ws` (WebSocket) library, plain HTTP static file serving
-- **Client**: Vanilla JS with HTML5 Canvas rendering
-- **Game logic**: Server-authoritative tick-based game loop at 20 Hz
-- **Tests**: Custom test harness in `test/game.test.js` (44 tests, all passing)
-- **Deployment**: Dockerfile based on `node:20-alpine`, exposes port 8080
+## Acceptance Criteria
 
-### File Structure
-
-| File | Purpose |
-|------|---------|
-| `server/index.js` | HTTP server, WebSocket server, player connection handling |
-| `server/game.js` | Game class with full game loop (lobby → active → round_end → reset) |
-| `client/index.html` | Single-page HTML with HUD elements and canvas |
-| `client/client.js` | Client-side rendering, input handling, WebSocket communication |
-| `test/game.test.js` | Unit tests for game logic |
-
-## Decision
-
-Since no task was specified, the implementation agent will verify the existing project builds and tests pass, and make no code changes. This is a no-op execution.
-
-## Sources
-
-No external research was needed — the task is undefined.
+- Controls dialog is shown on page load
+- Shows WASD for movement, Mouse for aim, Left Click for shoot
+- Dismissible via button, backdrop click, Escape key, or H key
+- H key toggles the dialog back open after dismissal
+- Does not block WebSocket connection (connect() called before dialog logic)
+- Existing tests still pass (dialog is client-only, no server changes)
