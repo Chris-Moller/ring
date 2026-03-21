@@ -17,6 +17,12 @@ const {
   clampPointToPolygon,
 } = require('../server/game');
 
+const {
+  NPC_SHOOT_RANGE,
+  MAX_NPC_COUNT,
+  MIN_REAL_PLAYERS_FOR_NO_BOTS,
+} = require('../server/npc');
+
 let passed = 0;
 let failed = 0;
 
@@ -900,6 +906,204 @@ test('NPC ring damage: NPCs outside ring take damage', () => {
     game.applyRingDamage(1);
     assert(npc.hp < hpBefore, 'NPC took ring damage');
   }
+});
+
+// --- NPC Shooting Behavior Tests ---
+
+test('NPC shooting: NPC creates bullet when enemy is within NPC_SHOOT_RANGE', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const realId = game.addPlayer(mockWs1);
+  game.fillWithNPCs();
+  game.startRound();
+
+  const npcId = Array.from(game.npcIds)[0];
+  assert(npcId !== undefined, 'NPC exists for shooting test');
+
+  const npc = game.players.get(npcId);
+  const realPlayer = game.players.get(realId);
+
+  // Place the NPC and real player within NPC_SHOOT_RANGE of each other
+  // Both must be inside the ring (which equals arena at round start)
+  npc.x = game.arenaCentroid.x;
+  npc.y = game.arenaCentroid.y;
+  npc.lastShot = 0; // ensure cooldown is clear
+
+  // Place enemy close — well within shoot range
+  realPlayer.x = npc.x + NPC_SHOOT_RANGE * 0.5;
+  realPlayer.y = npc.y;
+
+  const bulletsBefore = game.bullets.length;
+  game.tickNPCs(0.05);
+  assert(game.bullets.length > bulletsBefore, 'NPC fired a bullet at nearby enemy');
+
+  // Verify the bullet belongs to the NPC
+  const npcBullet = game.bullets.find(b => b.ownerId === npcId);
+  assert(npcBullet !== undefined, 'bullet is owned by the NPC');
+});
+
+test('NPC shooting: NPC does NOT shoot when all enemies are outside NPC_SHOOT_RANGE', () => {
+  const game = new Game();
+  // Use 3 real players so only 1 NPC is spawned — easier to control
+  const realIds = [];
+  for (let i = 0; i < 3; i++) {
+    realIds.push(game.addPlayer({ readyState: 1, send: () => {} }));
+  }
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 1, 'exactly 1 NPC for this test');
+  game.startRound();
+
+  const npcId = Array.from(game.npcIds)[0];
+  const npc = game.players.get(npcId);
+
+  // Place NPC at centroid
+  npc.x = game.arenaCentroid.x;
+  npc.y = game.arenaCentroid.y;
+  npc.lastShot = 0;
+
+  // Place ALL real players far away (beyond shoot range) using different arena vertices
+  for (let i = 0; i < realIds.length; i++) {
+    const v = game.arenaVertices[i % game.arenaVertices.length];
+    const rp = game.players.get(realIds[i]);
+    rp.x = game.arenaCentroid.x + (v.x - game.arenaCentroid.x) * 0.9;
+    rp.y = game.arenaCentroid.y + (v.y - game.arenaCentroid.y) * 0.9;
+  }
+
+  // Verify all enemies are beyond shoot range of the NPC
+  for (const rid of realIds) {
+    const rp = game.players.get(rid);
+    const dx = rp.x - npc.x;
+    const dy = rp.y - npc.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    assert(dist >= NPC_SHOOT_RANGE, `enemy ${rid} beyond shoot range (dist=${dist.toFixed(0)})`);
+  }
+
+  const bulletsBefore = game.bullets.length;
+  game.tickNPCs(0.05);
+  assert(game.bullets.length === bulletsBefore, 'NPC did not shoot when all enemies are far away');
+});
+
+// --- NPC Ring-Avoidance AI Tests ---
+
+test('NPC ring-avoidance: NPC outside ring moves toward centroid and does not shoot', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const realId = game.addPlayer(mockWs1);
+  game.fillWithNPCs();
+  game.startRound();
+
+  // Shrink ring very small so placing NPC outside is easy
+  game.ringVertices = scalePolygonTowardCentroid(
+    game.arenaVertices,
+    game.arenaCentroid,
+    0.98
+  );
+
+  const npcId = Array.from(game.npcIds)[0];
+  assert(npcId !== undefined, 'NPC exists for ring-avoidance test');
+
+  const npc = game.players.get(npcId);
+  const realPlayer = game.players.get(realId);
+
+  // Place NPC outside the shrunken ring but inside arena
+  const v = game.arenaVertices[0];
+  npc.x = game.arenaCentroid.x + (v.x - game.arenaCentroid.x) * 0.5;
+  npc.y = game.arenaCentroid.y + (v.y - game.arenaCentroid.y) * 0.5;
+  npc.lastShot = 0;
+
+  // Confirm NPC is outside ring
+  const outsideRing = !pointInConvexPolygon(npc.x, npc.y, game.ringVertices);
+  assert(outsideRing, 'NPC is outside the shrunken ring');
+
+  // Place real player close to NPC — normally would trigger shooting,
+  // but ring-avoidance should take priority
+  realPlayer.x = npc.x + 30;
+  realPlayer.y = npc.y;
+
+  // Reset NPC movement inputs to known state
+  npc.input.up = false;
+  npc.input.down = false;
+  npc.input.left = false;
+  npc.input.right = false;
+
+  const bulletsBefore = game.bullets.length;
+  game.tickNPCs(0.05);
+
+  // NPC should NOT shoot (ring-avoidance returns { shoot: false })
+  assert(game.bullets.length === bulletsBefore, 'NPC does not shoot when outside ring');
+
+  // NPC should have movement inputs set toward centroid
+  const hasInput = npc.input.up || npc.input.down || npc.input.left || npc.input.right;
+  assert(hasInput, 'NPC has movement input toward centroid when outside ring');
+
+  // Verify direction: NPC should be moving toward centroid
+  // The centroid relative to NPC determines which inputs should be set
+  const toCentroidX = game.arenaCentroid.x - npc.x;
+  const toCentroidY = game.arenaCentroid.y - npc.y;
+
+  if (Math.abs(toCentroidX) > 10) {
+    const correctHorizontal = toCentroidX > 0 ? npc.input.right : npc.input.left;
+    assert(correctHorizontal, 'NPC horizontal movement is toward centroid');
+  }
+  if (Math.abs(toCentroidY) > 10) {
+    const correctVertical = toCentroidY > 0 ? npc.input.down : npc.input.up;
+    assert(correctVertical, 'NPC vertical movement is toward centroid');
+  }
+});
+
+// --- NPC Count Formula Boundary Tests ---
+
+test('NPC count formula: 0 real players → 4 NPCs', () => {
+  const game = new Game();
+  // No real players
+  game.fillWithNPCs();
+  assert(game.npcIds.size === MAX_NPC_COUNT, `0 real → ${MAX_NPC_COUNT} NPCs (got ${game.npcIds.size})`);
+  assert(game.players.size === MAX_NPC_COUNT, `total players = ${MAX_NPC_COUNT}`);
+});
+
+test('NPC count formula: 1 real player → 3 NPCs (total 4)', () => {
+  const game = new Game();
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 3, `1 real → 3 NPCs (got ${game.npcIds.size})`);
+  assert(game.players.size === 4, `total players = 4 (got ${game.players.size})`);
+});
+
+test('NPC count formula: 2 real players → 2 NPCs (total 4)', () => {
+  const game = new Game();
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 2, `2 real → 2 NPCs (got ${game.npcIds.size})`);
+  assert(game.players.size === 4, `total players = 4 (got ${game.players.size})`);
+});
+
+test('NPC count formula: 3 real players → 1 NPC (total 4)', () => {
+  const game = new Game();
+  for (let i = 0; i < 3; i++) {
+    game.addPlayer({ readyState: 1, send: () => {} });
+  }
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 1, `3 real → 1 NPC (got ${game.npcIds.size})`);
+  assert(game.players.size === 4, `total players = 4 (got ${game.players.size})`);
+});
+
+test('NPC count formula: 4 real players → 0 NPCs', () => {
+  const game = new Game();
+  for (let i = 0; i < 4; i++) {
+    game.addPlayer({ readyState: 1, send: () => {} });
+  }
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 0, `4 real → 0 NPCs (got ${game.npcIds.size})`);
+});
+
+test('NPC count formula: 5 real players → 0 NPCs', () => {
+  const game = new Game();
+  for (let i = 0; i < 5; i++) {
+    game.addPlayer({ readyState: 1, send: () => {} });
+  }
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 0, `5 real → 0 NPCs (got ${game.npcIds.size})`);
 });
 
 // --- Summary ---
