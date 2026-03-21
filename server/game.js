@@ -1,5 +1,13 @@
 'use strict';
 
+const {
+  NPC_NAMES,
+  MAX_NPC_COUNT,
+  MIN_REAL_PLAYERS_FOR_NO_BOTS,
+  createNPC,
+  updateNPCAI,
+} = require('./npc');
+
 // --- Constants ---
 const ARENA_RADIUS = 500;
 const PLAYER_RADIUS = 15;
@@ -226,6 +234,8 @@ class Game {
     this.lastTick = Date.now();
     this.tickInterval = null;
     this.onBroadcast = null; // callback for broadcasting state
+    this.npcIds = new Set();
+    this.npcNameIndex = 0;
   }
 
   start() {
@@ -270,6 +280,7 @@ class Game {
   removePlayer(id) {
     this.players.delete(id);
     this.spectators.delete(id);
+    this.npcIds.delete(id);
 
     // Check win condition if game is active
     if (this.state === STATE_ACTIVE) {
@@ -279,6 +290,90 @@ class Game {
     // Check lobby state
     if (this.state === STATE_LOBBY) {
       this.checkLobbyStart();
+    }
+  }
+
+  getRealPlayerCount() {
+    let count = 0;
+    for (const [id] of this.players) {
+      if (!this.npcIds.has(id)) count++;
+    }
+    return count;
+  }
+
+  addNPC() {
+    const id = this.nextPlayerId++;
+    const name = NPC_NAMES[this.npcNameIndex % NPC_NAMES.length];
+    this.npcNameIndex++;
+    const npc = createNPC(id, name);
+    this.spawnPlayer(npc);
+    this.players.set(id, npc);
+    this.npcIds.add(id);
+    return id;
+  }
+
+  removeNPC(id) {
+    this.players.delete(id);
+    this.npcIds.delete(id);
+    this.spectators.delete(id);
+  }
+
+  removeAllNPCs() {
+    for (const id of this.npcIds) {
+      this.players.delete(id);
+      this.spectators.delete(id);
+    }
+    this.npcIds.clear();
+  }
+
+  fillWithNPCs() {
+    const realCount = this.getRealPlayerCount();
+    if (realCount >= MIN_REAL_PLAYERS_FOR_NO_BOTS) {
+      // Remove all NPCs if enough real players
+      this.removeAllNPCs();
+      return;
+    }
+
+    const totalDesired = Math.min(realCount + MAX_NPC_COUNT, MIN_REAL_PLAYERS_FOR_NO_BOTS);
+    const currentNPCCount = this.npcIds.size;
+    const currentTotal = realCount + currentNPCCount;
+
+    if (currentTotal >= totalDesired) {
+      // Remove excess NPCs if real players joined
+      const excess = currentTotal - totalDesired;
+      if (excess > 0) {
+        const npcIdArray = Array.from(this.npcIds);
+        for (let i = 0; i < excess && i < npcIdArray.length; i++) {
+          this.removeNPC(npcIdArray[npcIdArray.length - 1 - i]);
+        }
+      }
+      return;
+    }
+
+    const needed = totalDesired - currentTotal;
+    for (let i = 0; i < needed; i++) {
+      this.addNPC();
+    }
+  }
+
+  tickNPCs(dt) {
+    for (const npcId of this.npcIds) {
+      const npc = this.players.get(npcId);
+      if (!npc || !npc.alive) continue;
+
+      const result = updateNPCAI(npc, {
+        players: this.players,
+        ringVertices: this.ringVertices,
+        arenaCentroid: this.arenaCentroid,
+        pointInPolygon: pointInConvexPolygon,
+        arenaVertices: this.arenaVertices,
+        spectators: this.spectators,
+        npcIds: this.npcIds,
+      });
+
+      if (result.shoot) {
+        this.tryShoot(npc);
+      }
     }
   }
 
@@ -364,6 +459,7 @@ class Game {
   }
 
   tickLobby(now) {
+    this.fillWithNPCs();
     const aliveCount = this.getAlivePlayers().length;
 
     if (aliveCount >= MIN_PLAYERS_TO_START) {
@@ -412,6 +508,9 @@ class Game {
       this.arenaCentroid,
       shrinkProgress * 0.95
     );
+
+    // Update NPC AI inputs
+    this.tickNPCs(dt);
 
     // Move players
     for (const player of this.players.values()) {
@@ -526,6 +625,7 @@ class Game {
   }
 
   resetForNextRound() {
+    this.removeAllNPCs();
     this.state = STATE_LOBBY;
     this.arenaVertices = generateConvexPolygon(
       5 + Math.floor(Math.random() * 6),
@@ -588,6 +688,7 @@ class Game {
         alive: p.alive,
         name: p.name,
         isSpectator: this.spectators.has(p.id),
+        isNPC: this.npcIds.has(p.id),
       });
     }
 

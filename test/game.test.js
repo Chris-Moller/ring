@@ -694,6 +694,215 @@ test('Property: movement clamp keeps player inside polygon (50 seeds)', () => {
   }
 });
 
+// --- NPC Tests ---
+
+test('NPC spawning: fillWithNPCs adds bots when 1 real player in lobby', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs);
+
+  game.fillWithNPCs();
+  assert(game.npcIds.size > 0, 'NPCs were added');
+  assert(game.players.size > 1, 'total players > 1');
+
+  // All NPCs should be inside arena
+  for (const npcId of game.npcIds) {
+    const npc = game.players.get(npcId);
+    assert(npc.alive, `NPC ${npcId} is alive`);
+    assert(
+      pointInConvexPolygon(npc.x, npc.y, game.arenaVertices),
+      `NPC ${npcId} spawned inside polygon`
+    );
+  }
+});
+
+test('NPC spawning: no NPCs when enough real players', () => {
+  const game = new Game();
+  for (let i = 0; i < 4; i++) {
+    game.addPlayer({ readyState: 1, send: () => {} });
+  }
+
+  game.fillWithNPCs();
+  assert(game.npcIds.size === 0, 'no NPCs when 4 real players');
+});
+
+test('NPC removal: excess NPCs removed when real players join', () => {
+  const game = new Game();
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.fillWithNPCs();
+  const npcCountBefore = game.npcIds.size;
+  assert(npcCountBefore > 0, 'NPCs exist before adding more real players');
+
+  // Add more real players
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.fillWithNPCs();
+
+  assert(game.npcIds.size < npcCountBefore, 'NPC count decreased after real players joined');
+});
+
+test('NPC AI tick: NPCs update their input state', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.fillWithNPCs();
+  game.startRound();
+
+  // Place an NPC far from centroid to ensure it moves
+  const npcId = Array.from(game.npcIds)[0];
+  if (npcId) {
+    const npc = game.players.get(npcId);
+    const v = game.arenaVertices[0];
+    npc.x = game.arenaCentroid.x + (v.x - game.arenaCentroid.x) * 0.7;
+    npc.y = game.arenaCentroid.y + (v.y - game.arenaCentroid.y) * 0.7;
+
+    game.tickNPCs(0.05);
+    // NPC should have some input set (movement toward centroid or enemies)
+    const hasInput = npc.input.up || npc.input.down || npc.input.left || npc.input.right;
+    assert(hasInput, 'NPC has movement input after AI tick');
+  }
+});
+
+test('NPC elimination: NPCs take damage and die like normal players', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  const id1 = game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.fillWithNPCs();
+  game.startRound();
+
+  const npcId = Array.from(game.npcIds)[0];
+  if (npcId) {
+    const npc = game.players.get(npcId);
+    const p1 = game.players.get(id1);
+
+    // Place bullet on NPC
+    game.bullets.push({
+      id: 'testnpc',
+      ownerId: id1,
+      x: npc.x,
+      y: npc.y,
+      vx: 0,
+      vy: 0,
+      radius: 4,
+      damage: BULLET_DAMAGE,
+      createdAt: Date.now(),
+    });
+
+    const hpBefore = npc.hp;
+    game.updateBullets(0.05, Date.now());
+    assert(npc.hp < hpBefore, 'NPC took bullet damage');
+  }
+});
+
+test('NPC in game state: getState includes isNPC flag', () => {
+  const game = new Game();
+  const mockWs = { readyState: 1, send: () => {} };
+  const id = game.addPlayer(mockWs);
+  game.fillWithNPCs();
+
+  const state = game.getState(id);
+  const realPlayer = state.players.find(p => p.id === id);
+  assert(realPlayer.isNPC === false, 'real player isNPC is false');
+
+  const npcPlayer = state.players.find(p => p.isNPC === true);
+  assert(npcPlayer !== undefined, 'NPC player has isNPC true in state');
+});
+
+test('NPC cleanup on round reset: all NPCs removed', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.fillWithNPCs();
+  assert(game.npcIds.size > 0, 'NPCs exist before reset');
+
+  game.startRound();
+  game.state = STATE_ROUND_END;
+  game.resetForNextRound();
+
+  assert(game.npcIds.size === 0, 'all NPCs removed after resetForNextRound');
+  // Only real players remain
+  for (const [pid] of game.players) {
+    assert(!game.npcIds.has(pid), `player ${pid} is not an NPC after reset`);
+  }
+});
+
+test('Win condition with NPCs: round ends correctly', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const id1 = game.addPlayer(mockWs1);
+  game.fillWithNPCs();
+  game.startRound();
+
+  // Kill all NPCs
+  for (const npcId of game.npcIds) {
+    const npc = game.players.get(npcId);
+    npc.hp = 0;
+    npc.alive = false;
+  }
+
+  game.checkWinCondition();
+  assert(game.state === STATE_ROUND_END, 'round ended when only real player left');
+  assert(game.winnerId === id1, 'real player wins');
+});
+
+test('NPC ws is null: NPCs have no WebSocket connection', () => {
+  const game = new Game();
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.fillWithNPCs();
+
+  for (const npcId of game.npcIds) {
+    const npc = game.players.get(npcId);
+    assert(npc.ws === null, `NPC ${npcId} has null ws`);
+  }
+});
+
+test('NPC names are assigned from NPC_NAMES array', () => {
+  const game = new Game();
+  game.addPlayer({ readyState: 1, send: () => {} });
+  game.fillWithNPCs();
+
+  for (const npcId of game.npcIds) {
+    const npc = game.players.get(npcId);
+    assert(typeof npc.name === 'string' && npc.name.length > 0, `NPC ${npcId} has a name`);
+  }
+});
+
+test('NPC ring damage: NPCs outside ring take damage', () => {
+  const game = new Game();
+  const mockWs1 = { readyState: 1, send: () => {} };
+  const mockWs2 = { readyState: 1, send: () => {} };
+  game.addPlayer(mockWs1);
+  game.addPlayer(mockWs2);
+  game.fillWithNPCs();
+  game.startRound();
+
+  // Shrink ring very small
+  game.ringVertices = scalePolygonTowardCentroid(
+    game.arenaVertices,
+    game.arenaCentroid,
+    0.98
+  );
+
+  const npcId = Array.from(game.npcIds)[0];
+  if (npcId) {
+    const npc = game.players.get(npcId);
+    // Place NPC outside the tiny ring
+    const v = game.arenaVertices[0];
+    npc.x = game.arenaCentroid.x + (v.x - game.arenaCentroid.x) * 0.5;
+    npc.y = game.arenaCentroid.y + (v.y - game.arenaCentroid.y) * 0.5;
+
+    const hpBefore = npc.hp;
+    game.applyRingDamage(1);
+    assert(npc.hp < hpBefore, 'NPC took ring damage');
+  }
+});
+
 // --- Summary ---
 console.log(`\n${'='.repeat(40)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

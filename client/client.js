@@ -155,7 +155,13 @@ function updateHUD() {
     } else {
       statusText.textContent = 'Waiting for players...';
     }
-    infoText.textContent = `${totalCount} player${totalCount !== 1 ? 's' : ''} in lobby`;
+    const botCount = gameState.players.filter((p) => p.isNPC).length;
+    const realCount = totalCount - botCount;
+    if (botCount > 0) {
+      infoText.textContent = `${realCount} player${realCount !== 1 ? 's' : ''} + ${botCount} bot${botCount !== 1 ? 's' : ''} in lobby`;
+    } else {
+      infoText.textContent = `${totalCount} player${totalCount !== 1 ? 's' : ''} in lobby`;
+    }
   } else if (gameState.gameState === 'active') {
     if (gameState.isSpectator) {
       statusText.textContent = 'SPECTATING';
@@ -372,9 +378,10 @@ function drawStickFigure(player, scale, cx, cy) {
   // Name label
   const fontSize = Math.max(7, r * 0.25);
   ctx.font = `${fontSize}px monospace`;
-  ctx.fillStyle = isMe ? '#4fc' : '#aaa';
+  const nameLabel = player.isNPC ? '[BOT] ' + player.name : player.name;
+  ctx.fillStyle = isMe ? '#4fc' : player.isNPC ? '#f80' : '#aaa';
   ctx.textAlign = 'center';
-  ctx.fillText(player.name, px, py + r * 0.8 + fontSize + 2);
+  ctx.fillText(nameLabel, px, py + r * 0.8 + fontSize + 2);
 
   ctx.restore();
 }
