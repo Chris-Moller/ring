@@ -366,9 +366,7 @@ class Game {
         ringVertices: this.ringVertices,
         arenaCentroid: this.arenaCentroid,
         pointInPolygon: pointInConvexPolygon,
-        arenaVertices: this.arenaVertices,
         spectators: this.spectators,
-        npcIds: this.npcIds,
       });
 
       if (result.shoot) {

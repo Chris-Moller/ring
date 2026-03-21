@@ -777,7 +777,6 @@ test('NPC elimination: NPCs take damage and die like normal players', () => {
   const npcId = Array.from(game.npcIds)[0];
   if (npcId) {
     const npc = game.players.get(npcId);
-    const p1 = game.players.get(id1);
 
     // Place bullet on NPC
     game.bullets.push({

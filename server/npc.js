@@ -4,8 +4,6 @@ const NPC_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Gho
 const MAX_NPC_COUNT = 4;
 const MIN_REAL_PLAYERS_FOR_NO_BOTS = 4;
 const NPC_SHOOT_RANGE = 200;
-const NPC_AIM_TOLERANCE = 0.3;
-const NPC_RING_DANGER_MARGIN = 50;
 
 function createNPC(id, name) {
   return {
@@ -18,13 +16,13 @@ function createNPC(id, name) {
     alive: true,
     lastShot: 0,
     input: { up: false, down: false, left: false, right: false },
-    name: name,
+    name,
     isNPC: true,
   };
 }
 
 function updateNPCAI(npc, ctx) {
-  const { players, ringVertices, arenaCentroid, pointInPolygon, spectators, npcIds } = ctx;
+  const { players, ringVertices, arenaCentroid, pointInPolygon, spectators } = ctx;
 
   if (!npc.alive) return { shoot: false };
 
@@ -62,21 +60,10 @@ function updateNPCAI(npc, ctx) {
   }
 
   if (nearestEnemy && nearestDist < NPC_SHOOT_RANGE) {
-    // Aim at enemy
-    const dx = nearestEnemy.x - npc.x;
-    const dy = nearestEnemy.y - npc.y;
-    const angleToEnemy = Math.atan2(dy, dx);
-    npc.angle = angleToEnemy;
-
-    // Move toward enemy
+    // Aim and move toward enemy
+    npc.angle = Math.atan2(nearestEnemy.y - npc.y, nearestEnemy.x - npc.x);
     setMovementToward(npc, nearestEnemy.x, nearestEnemy.y);
-
-    // Shoot if angle difference is small enough
-    const angleDiff = Math.abs(normalizeAngle(angleToEnemy - npc.angle));
-    if (angleDiff < NPC_AIM_TOLERANCE) {
-      return { shoot: true };
-    }
-    return { shoot: false };
+    return { shoot: true };
   }
 
   // No nearby enemy: move toward centroid with some randomness
@@ -98,19 +85,11 @@ function setMovementToward(npc, targetX, targetY) {
   else if (dy < -10) npc.input.up = true;
 }
 
-function normalizeAngle(angle) {
-  while (angle > Math.PI) angle -= Math.PI * 2;
-  while (angle < -Math.PI) angle += Math.PI * 2;
-  return angle;
-}
-
 module.exports = {
   NPC_NAMES,
   MAX_NPC_COUNT,
   MIN_REAL_PLAYERS_FOR_NO_BOTS,
   NPC_SHOOT_RANGE,
-  NPC_AIM_TOLERANCE,
-  NPC_RING_DANGER_MARGIN,
   createNPC,
   updateNPCAI,
 };
