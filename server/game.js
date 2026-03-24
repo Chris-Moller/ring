@@ -445,6 +445,12 @@ class Game {
         index++;
       }
     }
+
+    // Reset bot NPC state for new round
+    for (const [id, state] of this.npcState) {
+      state.lastTargetId = null;
+      state.targetAcquiredAt = 0;
+    }
   }
 
   tickActive(dt, now) {
@@ -456,6 +462,9 @@ class Game {
       this.arenaCentroid,
       shrinkProgress * 0.95
     );
+
+    // NPC bot AI
+    this.tickNPCs(dt, now);
 
     // Move players
     for (const player of this.players.values()) {
@@ -471,6 +480,108 @@ class Game {
 
     // Check win condition
     this.checkWinCondition();
+  }
+
+  tickNPCs(dt, now) {
+    for (const player of this.players.values()) {
+      if (!player.isBot || !player.alive) continue;
+
+      const state = this.npcState.get(player.id);
+      if (!state) continue;
+
+      // Reset input each tick
+      player.input.up = false;
+      player.input.down = false;
+      player.input.left = false;
+      player.input.right = false;
+
+      // 1. Ring avoidance: check if bot is near ring edge
+      const cx = this.arenaCentroid.x;
+      const cy = this.arenaCentroid.y;
+      const testX = cx + (player.x - cx) * 1.1;
+      const testY = cy + (player.y - cy) * 1.1;
+      const outsideRing = !pointInConvexPolygon(player.x, player.y, this.ringVertices);
+      const nearRingEdge = !pointInConvexPolygon(testX, testY, this.ringVertices);
+
+      if (outsideRing || nearRingEdge) {
+        // Move toward centroid
+        const toCx = cx - player.x;
+        const toCy = cy - player.y;
+        if (toCx < -1) player.input.left = true;
+        if (toCx > 1) player.input.right = true;
+        if (toCy < -1) player.input.up = true;
+        if (toCy > 1) player.input.down = true;
+        continue;
+      }
+
+      // 2. Find nearest alive non-bot enemy within shoot range
+      let target = null;
+      let targetDist = Infinity;
+      for (const other of this.players.values()) {
+        if (other.id === player.id || other.isBot || !other.alive) continue;
+        if (this.spectators.has(other.id)) continue;
+        const dx = other.x - player.x;
+        const dy = other.y - player.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < targetDist) {
+          targetDist = dist;
+          target = other;
+        }
+      }
+
+      if (target && targetDist <= NPC_SHOOT_RANGE) {
+        // 3. Track target — reaction delay
+        if (state.lastTargetId !== target.id) {
+          state.lastTargetId = target.id;
+          state.targetAcquiredAt = now;
+        }
+
+        // 4. Set aim angle
+        const dx = target.x - player.x;
+        const dy = target.y - player.y;
+        const angleToTarget = Math.atan2(dy, dx);
+        player.angle = angleToTarget;
+
+        // 5. Movement: approach or strafe
+        if (targetDist > NPC_STRAFE_RANGE) {
+          // Move toward target
+          if (dx < -1) player.input.left = true;
+          if (dx > 1) player.input.right = true;
+          if (dy < -1) player.input.up = true;
+          if (dy > 1) player.input.down = true;
+        } else {
+          // Strafe perpendicular (use bot id for consistent direction)
+          const strafeDir = player.id % 2 === 0 ? 1 : -1;
+          const perpX = -dy * strafeDir;
+          const perpY = dx * strafeDir;
+          if (perpX < -1) player.input.left = true;
+          if (perpX > 1) player.input.right = true;
+          if (perpY < -1) player.input.up = true;
+          if (perpY > 1) player.input.down = true;
+        }
+
+        // 6. Shooting: check angle tolerance and reaction delay
+        const angleDiff = Math.atan2(Math.sin(angleToTarget - player.angle), Math.cos(angleToTarget - player.angle));
+        if (Math.abs(angleDiff) < NPC_SHOOT_ANGLE_TOLERANCE && now - state.targetAcquiredAt >= NPC_REACTION_DELAY_MS) {
+          this.tryShoot(player);
+        }
+      } else {
+        // No target in range — reset target tracking
+        state.lastTargetId = null;
+
+        // 7. Wandering
+        if (now - state.lastWanderChange >= NPC_WANDER_INTERVAL_MS) {
+          state.wanderAngle = Math.random() * Math.PI * 2;
+          state.lastWanderChange = now;
+        }
+        const wx = Math.cos(state.wanderAngle);
+        const wy = Math.sin(state.wanderAngle);
+        if (wx < -0.3) player.input.left = true;
+        if (wx > 0.3) player.input.right = true;
+        if (wy < -0.3) player.input.up = true;
+        if (wy > 0.3) player.input.down = true;
+      }
+    }
   }
 
   movePlayer(player, dt) {
@@ -597,6 +708,14 @@ class Game {
       player.lastShot = 0;
       player.input = { up: false, down: false, left: false, right: false };
       index++;
+    }
+
+    // Reset bot NPC state
+    for (const [id, state] of this.npcState) {
+      state.lastTargetId = null;
+      state.targetAcquiredAt = 0;
+      state.wanderAngle = Math.random() * Math.PI * 2;
+      state.lastWanderChange = 0;
     }
   }
 
