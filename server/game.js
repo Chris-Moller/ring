@@ -244,6 +244,8 @@ class Game {
     this.leaderboard = new Leaderboard();
     this.registeredNicknames = new Map(); // nickname (lowercase) -> playerId
     this.machineGunPickup = null; // { x, y, collected, collectedBy }
+    this.npcState = new Map(); // id -> { lastTargetId, targetAcquiredAt, wanderAngle, lastWanderChange }
+    this.nextBotNumber = 1;
   }
 
   start() {
