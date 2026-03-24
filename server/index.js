@@ -126,7 +126,7 @@ game.start();
 
 // Spawn NPC bots
 for (let i = 0; i < NPC_COUNT; i++) {
-  game.addBot();
+  game.addNPC();
 }
 
 server.listen(PORT, () => {

@@ -1,6 +1,6 @@
 'use strict';
 
-const { createNPC, pickNPCName, updateNPCAI, MAX_NPC_COUNT, MIN_REAL_PLAYERS_FOR_NO_BOTS } = require('./npc');
+const { createNPC, pickNPCName, updateNPCAI, MAX_NPC_COUNT, MIN_REAL_PLAYERS_FOR_NO_BOTS, NPC_SHOOT_RANGE, NPC_SHOOT_ANGLE_TOLERANCE, NPC_REACTION_DELAY_MS } = require('./npc');
 const { Leaderboard, isReservedName } = require('./leaderboard');
 
 // --- Constants ---
@@ -22,20 +22,10 @@ const MIN_PLAYERS_TO_START = 2;
 const TICK_RATE = 20; // ticks per second
 const TICK_INTERVAL_MS = 1000 / TICK_RATE;
 
-// --- NPC Bot Constants ---
-const NPC_SHOOT_RANGE = 180;
-const NPC_SHOOT_ANGLE_TOLERANCE = 0.55; // radians (~31°)
-const NPC_REACTION_DELAY_MS = 400;
+// --- NPC Bot Constants (NPC_SHOOT_RANGE, NPC_SHOOT_ANGLE_TOLERANCE, NPC_REACTION_DELAY_MS imported from npc.js) ---
 const NPC_STRAFE_RANGE = 80;
 const NPC_WANDER_INTERVAL_MS = 2000;
 const NPC_COUNT = 3;
-
-function setInputFromDirection(input, dx, dy, threshold) {
-  if (dx < -threshold) input.left = true;
-  if (dx > threshold) input.right = true;
-  if (dy < -threshold) input.up = true;
-  if (dy > threshold) input.down = true;
-}
 
 // --- Polygon Geometry Utilities ---
 
@@ -622,93 +612,6 @@ class Game {
 
     // Check win condition
     this.checkWinCondition();
-  }
-
-  tickNPCs(dt, now) {
-    for (const player of this.players.values()) {
-      if (!player.isBot || !player.alive) continue;
-
-      const state = this.npcState.get(player.id);
-      if (!state) continue;
-
-      // Reset input each tick
-      player.input.up = false;
-      player.input.down = false;
-      player.input.left = false;
-      player.input.right = false;
-
-      // 1. Ring avoidance: check if bot is near ring edge
-      const cx = this.arenaCentroid.x;
-      const cy = this.arenaCentroid.y;
-      const testX = cx + (player.x - cx) * 1.1;
-      const testY = cy + (player.y - cy) * 1.1;
-      const outsideRing = !pointInConvexPolygon(player.x, player.y, this.ringVertices);
-      const nearRingEdge = !pointInConvexPolygon(testX, testY, this.ringVertices);
-
-      if (outsideRing || nearRingEdge) {
-        // Move toward centroid
-        setInputFromDirection(player.input, cx - player.x, cy - player.y, 1);
-        continue;
-      }
-
-      // 2. Find nearest alive non-bot enemy within shoot range
-      let target = null;
-      let targetDist = Infinity;
-      for (const other of this.players.values()) {
-        if (other.id === player.id || other.isBot || !other.alive) continue;
-        if (this.spectators.has(other.id)) continue;
-        const dx = other.x - player.x;
-        const dy = other.y - player.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < targetDist) {
-          targetDist = dist;
-          target = other;
-        }
-      }
-
-      if (target && targetDist <= NPC_SHOOT_RANGE) {
-        // 3. Track target — reaction delay
-        if (state.lastTargetId !== target.id) {
-          state.lastTargetId = target.id;
-          state.targetAcquiredAt = now;
-        }
-
-        // 4. Set aim angle with jitter (NPC_SHOOT_ANGLE_TOLERANCE makes bots inaccurate)
-        const dx = target.x - player.x;
-        const dy = target.y - player.y;
-        const angleToTarget = Math.atan2(dy, dx);
-        player.angle = angleToTarget + (Math.random() - 0.5) * NPC_SHOOT_ANGLE_TOLERANCE;
-
-        // 5. Movement: approach or strafe
-        if (targetDist > NPC_STRAFE_RANGE) {
-          // Move toward target
-          setInputFromDirection(player.input, dx, dy, 1);
-        } else {
-          // Strafe perpendicular (use bot id for consistent direction)
-          const strafeDir = player.id % 2 === 0 ? 1 : -1;
-          const perpX = -dy * strafeDir;
-          const perpY = dx * strafeDir;
-          setInputFromDirection(player.input, perpX, perpY, 1);
-        }
-
-        // 6. Shooting: check reaction delay
-        if (now - state.targetAcquiredAt >= NPC_REACTION_DELAY_MS) {
-          this.tryShoot(player);
-        }
-      } else {
-        // No target in range — reset target tracking
-        state.lastTargetId = null;
-
-        // 7. Wandering
-        if (now - state.lastWanderChange >= NPC_WANDER_INTERVAL_MS) {
-          state.wanderAngle = Math.random() * Math.PI * 2;
-          state.lastWanderChange = now;
-        }
-        const wx = Math.cos(state.wanderAngle);
-        const wy = Math.sin(state.wanderAngle);
-        setInputFromDirection(player.input, wx, wy, 0.3);
-      }
-    }
   }
 
   movePlayer(player, dt) {
