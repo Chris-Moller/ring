@@ -1,30 +1,25 @@
 # Integration Summary
 
 ## Plan Branch
-agent/a2b205a7-a2fa-4152-b9db-b193df4b7a51
+agent/a90ad6d9-70e2-47c3-8054-bc276cf3c4ea
 ## Upstream Repository
 soli-testbench/ring
 
 ## Suggested PR Title
-fix(ui): reduce player name size and reposition nickname field
+Nerf Bot AI Difficulty
 
 ## Suggested PR Description
-## Summary
-- Shrunk player name font from `Math.max(8, r*0.35)` to `Math.max(7, r*0.25)` for a smaller, less intrusive label
-- Repositioned name label dynamically below character feet (`py + r*0.8 + fontSize + 2`) to guarantee zero overlap with the stick figure at any scale
-- Moved nickname input container from centered (`top: 60px; left: 50%`) to top-right corner (`top: 10px; right: 16px`) to prevent overlap with the map canvas and HUD
-
-## Test plan
-- [x] All 881 existing tests pass (`npm test`)
-- [ ] Visual verification: player names appear in smaller font clearly below stick figure with no overlap
-- [ ] Visual verification: nickname input sits in top-right corner, away from map canvas and HUD
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Created implementation plan for nerfed NPC bot AI system with reduced shoot range (180), widened aim tolerance (0.55 rad), and 400ms reaction delay
 
 ---
 
 ## Original Task
 
-**Description**: The player name is still too big and overlapping with the character. Make it not overlap with the character at all, and in a smaller font just below the character. Move the nickname field so that it doesn't overlap with the UI; it overlaps with the map sometimes.
+**Description**: Reduce NPC bot combat effectiveness to make them feel like easier opponents for players. The bots currently have tight aim tolerance (0.3 rad), long shoot range (250 units), and instant target acquisition. Adjustments should include: reducing shoot range, widening aim angle tolerance (making bots less accurate), and adding a reaction delay before bots start shooting at a newly spotted enemy. The bots should still be functional opponents that move, shoot, and avoid the ring — just noticeably less lethal.
 
 **Acceptance Criteria**:
+1. NPC_SHOOT_RANGE is reduced (e.g., from 250 to ~180-200).
+2. NPC_SHOOT_ANGLE_TOLERANCE is increased (e.g., from 0.3 to ~0.5-0.6 radians) so bots miss more often.
+3. A reaction delay is added so bots don't instantly shoot when an enemy enters range (e.g., 300-500ms delay before first shot on a new target).
+4. Bots still exhibit core behaviors: moving toward enemies, strafing at close range, avoiding the ring boundary, and wandering when no enemy is found.
+5. Playtested to confirm bots feel noticeably easier but still provide a baseline challenge.
