@@ -19,7 +19,6 @@ const {
   NPC_SHOOT_ANGLE_TOLERANCE,
   NPC_REACTION_DELAY_MS,
   NPC_STRAFE_RANGE,
-  NPC_RING_SAFETY_MARGIN,
   NPC_WANDER_INTERVAL_MS,
   NPC_COUNT,
 } = require('../server/game');
@@ -708,7 +707,6 @@ test('NPC constants have correct nerfed values', () => {
   assert(NPC_SHOOT_ANGLE_TOLERANCE === 0.55, 'NPC_SHOOT_ANGLE_TOLERANCE is 0.55');
   assert(NPC_REACTION_DELAY_MS === 400, 'NPC_REACTION_DELAY_MS is 400');
   assert(NPC_STRAFE_RANGE === 80, 'NPC_STRAFE_RANGE is 80');
-  assert(NPC_RING_SAFETY_MARGIN === 50, 'NPC_RING_SAFETY_MARGIN is 50');
   assert(NPC_WANDER_INTERVAL_MS === 2000, 'NPC_WANDER_INTERVAL_MS is 2000');
   assert(NPC_COUNT === 3, 'NPC_COUNT is 3');
 });
@@ -782,7 +780,7 @@ test('Bot does NOT shoot at targets beyond NPC_SHOOT_RANGE', () => {
   assert(game.bullets.length === bulletsBefore, 'bot did not shoot at target beyond range');
 });
 
-test('Bot does NOT shoot when angle to target exceeds NPC_SHOOT_ANGLE_TOLERANCE', () => {
+test('Bot aim has angular jitter based on NPC_SHOOT_ANGLE_TOLERANCE', () => {
   const game = new Game();
   const mockWs = { readyState: 1, send: () => {} };
   const humanId = game.addPlayer(mockWs);
@@ -792,24 +790,35 @@ test('Bot does NOT shoot when angle to target exceeds NPC_SHOOT_ANGLE_TOLERANCE'
   const bot = game.players.get(botId);
   const human = game.players.get(humanId);
 
-  // Place human within range but at an angle the bot won't initially face
+  // Place human directly to the right of bot
   bot.x = game.arenaCentroid.x;
   bot.y = game.arenaCentroid.y;
   human.x = bot.x + 50;
   human.y = bot.y;
-  // Force bot to face a very different direction
-  bot.angle = Math.PI; // facing opposite
 
   const now = Date.now();
-  // Pre-set reaction delay as passed
   const state = game.npcState.get(botId);
   state.lastTargetId = humanId;
   state.targetAcquiredAt = now - NPC_REACTION_DELAY_MS - 100;
 
-  // Note: tickNPCs will update bot.angle to face the target, so the bot WILL shoot
-  // To test angle tolerance, we need to verify the constant is correct
-  assert(NPC_SHOOT_ANGLE_TOLERANCE === 0.55, 'angle tolerance is 0.55 radians (wider = more misses)');
-  assert(NPC_SHOOT_ANGLE_TOLERANCE > 0.3, 'angle tolerance is wider than pre-nerf 0.3');
+  const exactAngle = Math.atan2(human.y - bot.y, human.x - bot.x); // should be 0
+
+  // Run tickNPCs many times and collect aim angles
+  const angles = [];
+  for (let i = 0; i < 50; i++) {
+    bot.lastShot = 0;
+    game.tickNPCs(0.05, now + i);
+    angles.push(bot.angle);
+  }
+
+  // At least some angles should differ from the exact angle (jitter)
+  const deviations = angles.filter(a => Math.abs(a - exactAngle) > 0.01);
+  assert(deviations.length > 0, 'bot aim deviates from exact target angle due to jitter');
+
+  // All angles should be within NPC_SHOOT_ANGLE_TOLERANCE / 2 of exact angle
+  const maxDeviation = Math.max(...angles.map(a => Math.abs(a - exactAngle)));
+  assert(maxDeviation <= NPC_SHOOT_ANGLE_TOLERANCE / 2 + 0.01,
+    'aim jitter bounded by NPC_SHOOT_ANGLE_TOLERANCE');
 });
 
 test('Bot does NOT shoot before NPC_REACTION_DELAY_MS on new target', () => {
