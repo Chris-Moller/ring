@@ -26,6 +26,13 @@ const NPC_RING_SAFETY_MARGIN = 50;
 const NPC_WANDER_INTERVAL_MS = 2000;
 const NPC_COUNT = 3;
 
+function setInputFromDirection(input, dx, dy, threshold) {
+  if (dx < -threshold) input.left = true;
+  if (dx > threshold) input.right = true;
+  if (dy < -threshold) input.up = true;
+  if (dy > threshold) input.down = true;
+}
+
 // --- Polygon Geometry Utilities ---
 
 function convexHull(points) {
@@ -505,12 +512,7 @@ class Game {
 
       if (outsideRing || nearRingEdge) {
         // Move toward centroid
-        const toCx = cx - player.x;
-        const toCy = cy - player.y;
-        if (toCx < -1) player.input.left = true;
-        if (toCx > 1) player.input.right = true;
-        if (toCy < -1) player.input.up = true;
-        if (toCy > 1) player.input.down = true;
+        setInputFromDirection(player.input, cx - player.x, cy - player.y, 1);
         continue;
       }
 
@@ -545,24 +547,18 @@ class Game {
         // 5. Movement: approach or strafe
         if (targetDist > NPC_STRAFE_RANGE) {
           // Move toward target
-          if (dx < -1) player.input.left = true;
-          if (dx > 1) player.input.right = true;
-          if (dy < -1) player.input.up = true;
-          if (dy > 1) player.input.down = true;
+          setInputFromDirection(player.input, dx, dy, 1);
         } else {
           // Strafe perpendicular (use bot id for consistent direction)
           const strafeDir = player.id % 2 === 0 ? 1 : -1;
           const perpX = -dy * strafeDir;
           const perpY = dx * strafeDir;
-          if (perpX < -1) player.input.left = true;
-          if (perpX > 1) player.input.right = true;
-          if (perpY < -1) player.input.up = true;
-          if (perpY > 1) player.input.down = true;
+          setInputFromDirection(player.input, perpX, perpY, 1);
         }
 
-        // 6. Shooting: check angle tolerance and reaction delay
-        const angleDiff = Math.atan2(Math.sin(angleToTarget - player.angle), Math.cos(angleToTarget - player.angle));
-        if (Math.abs(angleDiff) < NPC_SHOOT_ANGLE_TOLERANCE && now - state.targetAcquiredAt >= NPC_REACTION_DELAY_MS) {
+        // 6. Shooting: check reaction delay
+        // (angle tolerance is inherently satisfied — player.angle is set to angleToTarget above)
+        if (now - state.targetAcquiredAt >= NPC_REACTION_DELAY_MS) {
           this.tryShoot(player);
         }
       } else {
@@ -576,10 +572,7 @@ class Game {
         }
         const wx = Math.cos(state.wanderAngle);
         const wy = Math.sin(state.wanderAngle);
-        if (wx < -0.3) player.input.left = true;
-        if (wx > 0.3) player.input.right = true;
-        if (wy < -0.3) player.input.up = true;
-        if (wy > 0.3) player.input.down = true;
+        setInputFromDirection(player.input, wx, wy, 0.3);
       }
     }
   }
