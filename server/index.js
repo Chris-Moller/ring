@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const { Game } = require('./game');
+const { Game, NPC_COUNT } = require('./game');
 
 const PORT = process.env.PORT || 8080;
 
@@ -123,6 +123,11 @@ wss.on('connection', (ws) => {
 });
 
 game.start();
+
+// Spawn NPC bots
+for (let i = 0; i < NPC_COUNT; i++) {
+  game.addBot();
+}
 
 server.listen(PORT, () => {
   console.log(`Ring - Battle Royale server running on http://localhost:${PORT}`);
