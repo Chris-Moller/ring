@@ -235,6 +235,8 @@ class Game {
     this.lastTick = Date.now();
     this.tickInterval = null;
     this.onBroadcast = null; // callback for broadcasting state
+    this.npcState = new Map(); // id -> { lastTargetId, targetAcquiredAt, wanderAngle, lastWanderChange }
+    this.nextBotNumber = 1;
   }
 
   start() {
@@ -289,6 +291,39 @@ class Game {
     if (this.state === STATE_LOBBY) {
       this.checkLobbyStart();
     }
+  }
+
+  addBot() {
+    const id = this.nextPlayerId++;
+    const player = {
+      id,
+      ws: null,
+      x: 0,
+      y: 0,
+      angle: 0,
+      hp: PLAYER_MAX_HP,
+      alive: true,
+      lastShot: 0,
+      input: { up: false, down: false, left: false, right: false },
+      name: `Bot ${this.nextBotNumber++}`,
+      isBot: true,
+    };
+
+    this.spawnPlayer(player);
+    this.players.set(id, player);
+    this.npcState.set(id, {
+      lastTargetId: null,
+      targetAcquiredAt: 0,
+      wanderAngle: Math.random() * Math.PI * 2,
+      lastWanderChange: 0,
+    });
+    return id;
+  }
+
+  removeBot(id) {
+    this.players.delete(id);
+    this.npcState.delete(id);
+    this.spectators.delete(id);
   }
 
   spawnPlayer(player) {
